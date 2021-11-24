@@ -1,8 +1,10 @@
 const zoom_modes = {
+    MIN: 'min',
     DAY: 'day',
     WEEK: 'week',
     MONTH: 'month',
     YEAR: 'year',
+    MAX: 'max',
 };
 const block_width_multiplyer = {
     'day': 1,
@@ -17,7 +19,7 @@ const OPTIONS = {
     right_x: document.body.clientWidth,
     left_x: 0,
     zoom_event: 'zoom',
-    block_base_width: 200,
+    block_base_width: 100,
 };
 const colors = {
     'day': ['#999', '#CCC'],
@@ -26,47 +28,85 @@ const colors = {
     'year': ['#99F', '#CCF'],
 };
 
+let prev_svg_transform = { k: 1, x: 0, y: 0 };
 let svg_transform = { k: 1, x: 0, y: 0 };
 let svg_pos = {
     start: -OPTIONS.width,
     end: 0,
 };
 let zoom_mode = zoom_modes.DAY;
+let svg, g, time_scale, zoom; // initialized in startup
 
+// Date::getTime() returns number of *milliseconds* since Jan 1, 1970
+const DAY_MILLIS = 24*60*60*1000;
+const WEEK_MILLIS = 7*24*60*60*1000;
+const MONTH_MILLIS = 31*24*60*60*1000; // for 31-day month
+const YEAR_MILLIS = 365*24*60*60*1000; // for 365-day year
+
+const max_time_window = {
+    'min': DAY_MILLIS,
+    'day': 16*DAY_MILLIS,
+    'week': 9*WEEK_MILLIS,
+    'month': 24*MONTH_MILLIS,
+    'year': 20*YEAR_MILLIS,
+    'max': 20*YEAR_MILLIS,
+};
+
+const next_zoom_mode = {
+    'min': zoom_modes.DAY,
+    'day': zoom_modes.WEEK,
+    'week': zoom_modes.MONTH,
+    'month': zoom_modes.YEAR,
+    'year': zoom_modes.MAX,
+    'max': zoom_modes.MAX,
+}
+const prev_zoom_mode = {
+    'min': zoom_modes.MIN,
+    'day': zoom_modes.MIN,
+    'week': zoom_modes.DAY,
+    'month': zoom_modes.WEEK,
+    'year': zoom_modes.MONTH,
+    'max': zoom_modes.YEAR,
+}
+
+const startup = () => {
+    // Create scale
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1);
+    const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    time_scale = d3.scaleTime().domain([yesterday, today]).range([-OPTIONS.block_base_width, 0])
+
+    // Create SVG with initial transformation (right edge == 0)
+    zoom = d3.zoom().on(OPTIONS.zoom_event, zoom_handler);
+    const tr = d3.zoomIdentity.translate(OPTIONS.width,0).scale(1)
+    svg = d3.select('#timeline')
+        .append('svg')
+        .attr('width', OPTIONS.width)
+        .attr('height', OPTIONS.height);
+    g = svg.append('g')
+    svg.call(zoom).call(zoom.transform, tr)
+}
+
+// programmatical zoom events can be detected with:  if (d3.event.sourceEvent == undefined)
 const zoom_handler = () => {
+    // copy transform and make sure y translation is ignored
     svg_transform = d3.event.transform;
     svg_transform.y = 0;
 
-    update_svg_pos();
-    no_future();
-    update_svg_pos();
-    draw_endpoints();
-    update_zoom_mode();
-    const [t, y_t] = calculate_ticks()
-    draw_ticks(t);
-    draw_year_ticks(y_t);
-    // draw_blocks();
+    update_svg_pos();                   // calculate edge coordinates
+    update_zoom_mode();                 // update zoom mode if necessary
+    no_future();                        // make sure future dates are not in view
+    update_svg_pos();                   // update edge coordinates (in case no_future changed transform)
+    draw_endpoints();                   // draw the edges
+    const [t, y_t] = calculate_ticks()  // calculate tick positions and labels for normal ticks (t) and year ticks (y_t)
+    draw_ticks(t);                      // draw the normal ticks
+    draw_year_ticks(y_t);               // draw the year ticks
+    draw_blocks(t);                     // draw blocks in between ticks 
     
-    svg.attr('transform', `translate(${svg_transform.x}, ${svg_transform.y}) scale(${svg_transform.k}, 1)`)
+    // transform svg and save state
+    g.attr('transform', `translate(${svg_transform.x}, ${svg_transform.y}) scale(${svg_transform.k}, 1)`)
+    prev_svg_transform = svg_transform;
 };
-
-
-// Create scale
-const now = new Date();
-const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1);
-const yesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-const time_scale = d3.scaleTime().domain([yesterday, today]).range([-OPTIONS.block_base_width, 0])
-
-
-const svg = d3.select('#timeline')
-    .append('svg')
-    .attr('width', OPTIONS.width)
-    .attr('height', OPTIONS.height)
-    .call(d3.zoom().on(OPTIONS.zoom_event, zoom_handler))
-    .append('g')
-    .attr('transform', `translate(${OPTIONS.width}, 0) scale(1,1)`);
-
 
 const update_svg_pos = () => {
     svg_pos.start = -svg_transform.x / svg_transform.k;
@@ -77,8 +117,8 @@ const draw_endpoints = () => {
     const color = svg_pos.end == 0 ? 'red' : 'black';
     const width = 4 / svg_transform.k;
 
-    svg.selectAll('rect.border').remove();
-    svg
+    g.selectAll('rect.border').remove();
+    g
         .append('rect')
         .attr('class', 'border')
         .attr('x', svg_pos.start)
@@ -87,8 +127,7 @@ const draw_endpoints = () => {
         .attr('height', 50)
         .style('fill', 'black');
 
-    
-    svg
+    g
         .append('rect')
         .attr('class', 'border')
         .attr('x', svg_pos.end-width)
@@ -97,41 +136,6 @@ const draw_endpoints = () => {
         .attr('height', 50)
         .style('fill', color);
 };
-
-/* TODO: 
-Rewrite to first calculate ticks and based on that create blocks + labels.
-Current approach does not work since months (and years) are not of equal length.
-1. determine which ticks are in current frame (depending on zoom_mode).
-2. loop over ticks.
-    a. create label with correct date format (depending on zoom_mode).
-    b. create block from prev to next tick.
-*/
-
-// Date::getTime() returns number of *milliseconds* since Jan 1, 1970
-const DAY_MILLIS = 24*60*60*1000;
-const WEEK_MILLIS = 7*24*60*60*1000;
-const MONTH_MILLIS = 31*24*60*60*1000; // for 31-day month
-const YEAR_MILLIS = 365*24*60*60*1000; // for 365-day year
-
-const max_time_window = {
-    'day': 16*DAY_MILLIS,
-    'week': 9*WEEK_MILLIS,
-    'month': 24*MONTH_MILLIS,
-    'year': 20*YEAR_MILLIS,
-};
-
-const next_zoom_mode = {
-    'day': zoom_modes.WEEK,
-    'week': zoom_modes.MONTH,
-    'month': zoom_modes.YEAR,
-    'year': zoom_modes.YEAR,
-}
-const prev_zoom_mode = {
-    'day': zoom_modes.DAY,
-    'week': zoom_modes.DAY,
-    'month': zoom_modes.WEEK,
-    'year': zoom_modes.MONTH,
-}
 
 const update_zoom_mode = () => {
     const start_date = time_scale.invert(svg_pos.start);
@@ -143,6 +147,12 @@ const update_zoom_mode = () => {
         zoom_mode = next_zoom_mode[zoom_mode];
     } else if (time_window < max_time_window[prev_zoom_mode[zoom_mode]]) {
         zoom_mode = prev_zoom_mode[zoom_mode];
+    }
+
+    if (zoom_mode == zoom_modes.MIN || zoom_mode == zoom_modes.MAX) {
+        console.log(`[${zoom_mode}] Cannot zoom further`);
+        svg_transform = prev_svg_transform;
+        svg.call(zoom.transform, svg_transform);
     }
 };
 
@@ -167,20 +177,32 @@ const calculate_ticks = () => {
         end_date.setDate(end_date.getDate());
         const num_ticks = (end_date.getTime() - start_date.getTime()) / DAY_MILLIS +1;
 
+        let color_i = Math.round(Math.abs(start_date.getTime()) / DAY_MILLIS) % 2;
         for (let i = 0; i < num_ticks; i++) {
+            color_i = (color_i +1) % 2;
             let d = new Date(start_date.getTime());
             d.setDate(d.getDate() + i);
-            ticks.push({ x: time_scale(d), d: d.toDateString().substring(4, 10) });
+            ticks.push({ 
+                x: time_scale(d), 
+                d: d.toDateString().substring(4, 10),
+                color_i: color_i,
+            });
         }
     } else if (zoom_mode == zoom_modes.WEEK) {
         start_date.setDate(start_date.getDate() - start_date.getDay() +7);
         end_date.setDate(end_date.getDate() - end_date.getDay());
         const num_ticks = (end_date.getTime() - start_date.getTime()) / WEEK_MILLIS +1;
-
+        
+        let color_i = Math.round(Math.abs(start_date.getTime()) / DAY_MILLIS) % 2;
         for (let i = 0; i < num_ticks; i++) {
+            color_i = (color_i +1) % 2;
             let d = new Date(start_date.getTime());
             d.setDate(d.getDate() + 7*i);
-            ticks.push({ x: time_scale(d), d: d.toDateString().substring(4, 10) });
+            ticks.push({ 
+                x: time_scale(d), 
+                d: d.toDateString().substring(4, 10),
+                color_i: color_i,
+            });
         }
     } else if (zoom_mode == zoom_modes.MONTH) {
         start_date.setDate(1);
@@ -192,7 +214,11 @@ const calculate_ticks = () => {
             let d = new Date(start_date.getTime());
             d.setMonth(d.getMonth() + i);
             let s = d.toDateString().substring(4, 7) + d.toDateString().substring(10) 
-            ticks.push({ x: time_scale(d), d: d.toDateString().substring(4, 7) });
+            ticks.push({ 
+                x: time_scale(d), 
+                d: d.toDateString().substring(4, 7),
+                color_i: d.getMonth() % 2,
+            });
         }
     } else if (zoom_mode == zoom_modes.YEAR) {
         start_date.setDate(1);
@@ -205,7 +231,11 @@ const calculate_ticks = () => {
         for (let i = 0; i < num_ticks; i++) {
             let d = new Date(start_date.getTime());
             d.setFullYear(d.getFullYear() + i);
-            ticks.push({ x: time_scale(d), d: d.getFullYear() });
+            ticks.push({ 
+                x: time_scale(d), 
+                d: d.getFullYear(),
+                color_i: d.getFullYear() % 2,
+            });
         }
     }
 
@@ -216,10 +246,10 @@ const calculate_ticks = () => {
 };
 
 const draw_ticks = (ticks) => {
-    svg.selectAll('rect.tick').remove();
-    svg.selectAll('text.tick').remove();
+    g.selectAll('rect.tick').remove();
+    g.selectAll('text.tick').remove();
     for (const tick of ticks) {
-        svg
+        g
             .append('rect')
             .attr('class', 'tick')
             .attr('x', tick.x-2 / svg_transform.k)
@@ -227,7 +257,7 @@ const draw_ticks = (ticks) => {
             .attr('width', 2 / svg_transform.k)
             .attr('height', 20)
             .style('fill', 'red');
-        svg
+        g
             .append('text')
             .attr('class', 'tick')
             .text(tick.d)
@@ -238,10 +268,10 @@ const draw_ticks = (ticks) => {
 }
 
 const draw_year_ticks = (ticks) => {
-    svg.selectAll('rect.year_tick').remove();
-    svg.selectAll('text.year_tick').remove();
+    g.selectAll('rect.year_tick').remove();
+    g.selectAll('text.year_tick').remove();
     for (const tick of ticks) {
-        svg
+        g
             .append('rect')
             .attr('class', 'year_tick')
             .attr('x', tick.x-2 / svg_transform.k)
@@ -249,7 +279,7 @@ const draw_year_ticks = (ticks) => {
             .attr('width', 2 / svg_transform.k)
             .attr('height', 40)
             .style('fill', 'red');
-        svg
+        g
             .append('text')
             .attr('class', 'year_tick')
             .text(tick.d)
@@ -259,46 +289,29 @@ const draw_year_ticks = (ticks) => {
     }
 }
 
-const draw_blocks = () => {
-    const block_width = OPTIONS.block_base_width * block_width_multiplyer[zoom_mode];
-    let first_block_num = Math.ceil(Math.abs(svg_pos.end) / block_width);
-    let last_block_num = Math.ceil(Math.abs(svg_pos.start) / block_width) +1;
-    let num_blocks = last_block_num - first_block_num;
+const draw_blocks = (ticks) => {
+    g.selectAll('rect.block').remove();
 
-    let first_block_offset = 0;
-    if (zoom_mode == zoom_modes.WEEK) {
-        first_block_offset = today.getDay() * OPTIONS.block_base_width * block_width_multiplyer['day'];
-        first_block_num--;
-        num_blocks++;
-    } else if (zoom_mode == zoom_modes.MONTH) {
-        first_block_offset = (today.getDate()-1) * OPTIONS.block_base_width * block_width_multiplyer['day'];
-        first_block_num--;
-        num_blocks++;
+    const last_tick = ticks[ticks.length-1]
+    if (last_tick.x != svg_pos.end) {
+        ticks.push({ x: svg_pos.end, d: '', color_i: (last_tick.color_i +1) % 2 });
     }
 
-    svg.selectAll('rect.block').remove();
-    svg.selectAll('text.block').remove();
+    let last_block = svg_pos.start;
 
-    for (let i = first_block_num; i < last_block_num; i++) {
-        const x = -i * block_width - first_block_offset;
-        const d = time_scale.invert(x+5);
-        svg
+    for (const tick of ticks) {
+        const width = tick.x - last_block;
+        g
             .append('rect')
             .attr('class', 'block')
-            .attr('x', x)
-            .attr('y', OPTIONS.center_y-5)
-            .attr('width', block_width)
+            .attr('x', last_block)
+            .attr('y', OPTIONS.center_y -5)
+            .attr('width', width)
             .attr('height', 10)
-            .style('fill', colors[zoom_mode][i%2]);
-        // svg
-        //     .append('text')
-        //     .attr('class', 'block')
-        //     .text(d.toDateString().substring(4, 10))
-        //     .attr('x', (x-0) * svg_transform.k)
-        //     .attr('y', OPTIONS.center_y-5)
-        //     .attr('transform', `scale(${1/svg_transform.k},1)`)
+            .style('fill', colors[zoom_mode][tick.color_i])
+        
+        last_block = tick.x;
     }
-
 };
 
 const no_future = () => {
@@ -308,18 +321,19 @@ const no_future = () => {
     }
 };
 
-draw_endpoints()
-const [t, y_t] = calculate_ticks()
-draw_ticks(t);
-draw_year_ticks(y_t);
-draw_blocks()
+startup()
+
+
 /*
 TODO:
 x only scale in x direction
+x zoom_mode should not change when just translating
+x week / month / year should start at mon/1/jan
 - first milestone: empty timeline with hour/day/month/year/century markings depending on zoom level
-- zoom_mode should not change when just translating
-- changing browser size should update svg.
-- week / month / year should start at mon/1/jan
+- update color scheme
+- labels inside blocks?
+- changing browser size should update svg
 - start view: last n years?
+- smaller zoom modes: hours and minutes
 - only remove/create stuff that moved in or out of window
 */
