@@ -14,8 +14,8 @@ const block_width_multiplyer = {
 };
 const OPTIONS = {
     width: document.body.clientWidth,
-    height: 100,
-    center_y: 50,
+    height: 200,
+    center_y: 100,
     main_row_y: 40,
     main_row_height: 40,
     second_row_y: 80,
@@ -177,7 +177,7 @@ const calculate_ticks = () => {
     }
 
     if (zoom_mode == zoom_modes.DAY) {
-        start_date.setDate(start_date.getDate()+1);
+        start_date.setDate(start_date.getDate());
         end_date.setDate(end_date.getDate());
         const num_ticks = (end_date.getTime() - start_date.getTime()) / DAY_MILLIS +1;
 
@@ -268,7 +268,7 @@ const draw_ticks = (ticks) => {
             .attr('class', 'tick')
             .text(tick.d)
             .attr('x', (tick.x + offset) * svg_transform.k)
-            .attr('y', OPTIONS.center_y+10)
+            .attr('y', OPTIONS.main_row_y + OPTIONS.main_row_height/2 + 5)
             .attr('transform', `scale(${1/svg_transform.k},1)`)
             .attr('text-anchor', 'middle')
             .style('fill', '#666');
@@ -307,24 +307,34 @@ const draw_blocks = (ticks) => {
 
     let last_block = svg_pos.start;
     let test_colors = ['#EAEAEA', '#EEF']
+
+    g
+        .append('rect')
+        .attr('class', 'block')
+        .attr('x', svg_pos.start)
+        .attr('y', OPTIONS.main_row_y -2)
+        .attr('width', svg_pos.end - svg_pos.start)
+        .attr('height', 2)
+        .style('fill', '#999');
+
     for (const tick of ticks) {
         const width = tick.x - last_block;
         g
             .append('rect')
             .attr('class', 'block')
             .attr('x', last_block)
-            .attr('y', OPTIONS.center_y -12)
+            .attr('y', OPTIONS.main_row_y)
             .attr('width', width)
-            .attr('height', 2)
-            .style('fill', colors[zoom_mode][0]);
+            .attr('height', OPTIONS.main_row_height)
+            .style('fill', test_colors[tick.color_i]);
         g
             .append('rect')
             .attr('class', 'block')
             .attr('x', last_block)
-            .attr('y', OPTIONS.center_y -10)
+            .attr('y', OPTIONS.second_row_y)
             .attr('width', width)
             .attr('height', 30)
-            .style('fill', test_colors[tick.color_i]);
+            .style('fill', '#F5F5F5');
         
         last_block = tick.x;
     }
