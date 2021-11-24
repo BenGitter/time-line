@@ -1,13 +1,14 @@
 body {
     margin: 0;
     padding: 0;
-    background-color: #EEE;
+    background-color: #FAFAFA;
     font-family: sans-serif;
 }
 
 #timeline svg{
     box-sizing: border-box;
     border: 1px solid black;
+    border: none;
     /* width: 100vw;
     height: 20px;
     background-color: black; */

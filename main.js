@@ -16,6 +16,10 @@ const OPTIONS = {
     width: document.body.clientWidth,
     height: 100,
     center_y: 50,
+    main_row_y: 40,
+    main_row_height: 40,
+    second_row_y: 80,
+    second_row_height: 30,
     right_x: document.body.clientWidth,
     left_x: 0,
     zoom_event: 'zoom',
@@ -97,11 +101,11 @@ const zoom_handler = () => {
     update_zoom_mode();                 // update zoom mode if necessary
     no_future();                        // make sure future dates are not in view
     update_svg_pos();                   // update edge coordinates (in case no_future changed transform)
-    draw_endpoints();                   // draw the edges
+    // draw_endpoints();                   // draw the edges
     const [t, y_t] = calculate_ticks()  // calculate tick positions and labels for normal ticks (t) and year ticks (y_t)
+    draw_blocks(t);                     // draw blocks in between ticks 
     draw_ticks(t);                      // draw the normal ticks
     draw_year_ticks(y_t);               // draw the year ticks
-    draw_blocks(t);                     // draw blocks in between ticks 
     
     // transform svg and save state
     g.attr('transform', `translate(${svg_transform.x}, ${svg_transform.y}) scale(${svg_transform.k}, 1)`)
@@ -248,22 +252,26 @@ const calculate_ticks = () => {
 const draw_ticks = (ticks) => {
     g.selectAll('rect.tick').remove();
     g.selectAll('text.tick').remove();
+
+    const offset = (ticks[1].x - ticks[0].x) / 2;
     for (const tick of ticks) {
-        g
-            .append('rect')
-            .attr('class', 'tick')
-            .attr('x', tick.x-2 / svg_transform.k)
-            .attr('y', OPTIONS.center_y-5)
-            .attr('width', 2 / svg_transform.k)
-            .attr('height', 20)
-            .style('fill', 'red');
+        // g
+        //     .append('rect')
+        //     .attr('class', 'tick')
+        //     .attr('x', tick.x-2 / svg_transform.k)
+        //     .attr('y', OPTIONS.center_y-10)
+        //     .attr('width', 2 / svg_transform.k)
+        //     .attr('height', 20)
+        //     .style('fill', 'red');
         g
             .append('text')
             .attr('class', 'tick')
             .text(tick.d)
-            .attr('x', (tick.x-0) * svg_transform.k)
-            .attr('y', OPTIONS.center_y-5)
+            .attr('x', (tick.x + offset) * svg_transform.k)
+            .attr('y', OPTIONS.center_y+10)
             .attr('transform', `scale(${1/svg_transform.k},1)`)
+            .attr('text-anchor', 'middle')
+            .style('fill', '#666');
     }
 }
 
@@ -298,17 +306,25 @@ const draw_blocks = (ticks) => {
     }
 
     let last_block = svg_pos.start;
-
+    let test_colors = ['#EAEAEA', '#EEF']
     for (const tick of ticks) {
         const width = tick.x - last_block;
         g
             .append('rect')
             .attr('class', 'block')
             .attr('x', last_block)
-            .attr('y', OPTIONS.center_y -5)
+            .attr('y', OPTIONS.center_y -12)
             .attr('width', width)
-            .attr('height', 10)
-            .style('fill', colors[zoom_mode][tick.color_i])
+            .attr('height', 2)
+            .style('fill', colors[zoom_mode][0]);
+        g
+            .append('rect')
+            .attr('class', 'block')
+            .attr('x', last_block)
+            .attr('y', OPTIONS.center_y -10)
+            .attr('width', width)
+            .attr('height', 30)
+            .style('fill', test_colors[tick.color_i]);
         
         last_block = tick.x;
     }
