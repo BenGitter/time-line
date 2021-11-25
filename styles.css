@@ -8,4 +8,5 @@ body {
 #timeline svg{
     box-sizing: border-box;
     border: none;
+    width: 100vw;
 }
